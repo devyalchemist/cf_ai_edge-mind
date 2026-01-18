@@ -48,6 +48,7 @@ graph TD
 
     DO -->|Stream Text| Worker
     Worker -->|JSON| User
+```
 
 Data Flow
 
@@ -63,34 +64,38 @@ Persistence: The new response is saved atomically to storage.
 
 ## 🛠️ Technology Stack
 
-| Component | Technology | Role |
-| :--- | :--- | :--- |
-| **Runtime** | Cloudflare Workers | The API Gateway & UI Server |
-| **Compute** | Durable Objects | The stateful "memory lockers" |
-| **Storage** | DO SQLite Backend | High-performance persistence |
-| **AI Model** | Llama 3.1 8B Instruct | Natural Language Processing |
-| **Language** | JavaScript (ESM) | Logic |
-| **Tooling** | Wrangler | Deployment & Local Dev |
+| Component    | Technology            | Role                          |
+| :----------- | :-------------------- | :---------------------------- |
+| **Runtime**  | Cloudflare Workers    | The API Gateway & UI Server   |
+| **Compute**  | Durable Objects       | The stateful "memory lockers" |
+| **Storage**  | DO SQLite Backend     | High-performance persistence  |
+| **AI Model** | Llama 3.1 8B Instruct | Natural Language Processing   |
+| **Language** | JavaScript (ESM)      | Logic                         |
+| **Tooling**  | Wrangler              | Deployment & Local Dev        |
 
 ## Getting Started
+
 Follow these steps to deploy your own instance of cf_ai_edge-mind.
 
 1. Clone & Install
-Bash
+   Bash
 
 # Clone the repository
+
 git clone [https://github.com/devyalchemist/cf_ai_edge-mind.git](https://github.com/devyalchemist/cf_ai_edge-mind.git)
 cd cf_ai_edge-mind
 
 # Install dependencies
+
 npm install
 
 2. Configure Cloudflare
-Ensure your wrangler.toml is set up for the Free Tier (SQLite backend).
+   Ensure your wrangler.toml is set up for the Free Tier (SQLite backend).
 
 Ini, TOML
 
 # wrangler.toml
+
 [ai]
 binding = "AI"
 
@@ -103,7 +108,7 @@ tag = "v1"
 new_sqlite_classes = ["ChatRoom"]
 
 3. Run Locally (Hybrid)
-Since your laptop cannot run the Llama model, use --remote to tunnel AI requests to Cloudflare.
+   Since your laptop cannot run the Llama model, use --remote to tunnel AI requests to Cloudflare.
 
 Bash
 
@@ -129,4 +134,3 @@ While Llama 3.3 (70B) offers higher intelligence, it incurs higher latency and t
 [ ] Secure Auth: Replace the handle system with Cloudflare Access (OAuth).
 
 Built by DevyAlchemist.
-```
