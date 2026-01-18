@@ -32,7 +32,7 @@ const html = `
 
   <div id="login-overlay">
     <div class="login-box">
-      <h2>👋 Who are you?</h2>
+      <h2>Who are you?</h2>
       <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">Enter a unique handle to access your persistent memory.</p>
       <form id="login-form">
         <input type="text" id="username-input" placeholder="e.g. devyalchemist" required />
