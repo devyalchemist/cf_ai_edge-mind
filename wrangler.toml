@@ -1,0 +1,20 @@
+name = "cloudflare-edge-ai-chat"
+main = "src/index.js"
+compatibility_date = "2025-09-27"
+
+# 1. Enable Cloudflare AI
+[ai]
+binding = "AI"
+
+# 2. Enable Durable Objects
+[[durable_objects.bindings]]
+name = "CHAT_HISTORY"
+class_name = "ChatRoom"
+
+# 3. MIGRATION FIX: Use SQLite backend for Free Tier
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatRoom"]  # <-- THIS IS THE CHANGE
+
+[observability]
+enabled = true

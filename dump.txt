@@ -1,0 +1,353 @@
+import { DurableObject } from 'cloudflare:workers';
+
+// ==========================================
+// 1. THE FRONTEND (Served directly from Edge)
+// ==========================================
+const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cloudflare Edge AI</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f4f4f5; color: #18181b; }
+  .header { text-align: center; margin-bottom: 20px; }
+  .chat-container { height: 60vh; overflow-y: scroll; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; gap: 12px; border: 1px solid #e4e4e7; }
+  .message { padding: 10px 16px; border-radius: 20px; max-width: 80%; line-height: 1.5; font-size: 15px; }
+  .user { align-self: flex-end; background: #2563eb; color: white; border-bottom-right-radius: 4px; }
+  .ai { align-self: flex-start; background: #f4f4f5; color: #18181b; border-bottom-left-radius: 4px; border: 1px solid #e4e4e7; }
+  .input-area { display: flex; gap: 10px; margin-top: 20px; }
+  input { flex: 1; padding: 14px; border: 1px solid #e4e4e7; border-radius: 8px; font-size: 16px; outline: none; transition: border-color 0.2s; }
+  input:focus { border-color: #2563eb; }
+  button { padding: 14px 24px; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.2s; }
+  button:hover { background: #1d4ed8; }
+  button:disabled { background: #93c5fd; cursor: not-allowed; }
+  .status { font-size: 12px; color: #71717a; text-align: center; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h2>⚡ EdgeMind Chat</h2>
+    <p>Powered by Cloudflare Workers + Llama 3.3</p>
+  </div>
+  
+  <div id="chat-box" class="chat-container">
+    <div class="message ai">Hello! I'm running on the Edge. I remember our conversation. What's on your mind?</div>
+  </div>
+  
+  <form id="chat-form" class="input-area">
+    <input type="text" id="msg-input" placeholder="Type a message..." required autocomplete="off"/>
+    <button type="submit" id="send-btn">Send</button>
+  </form>
+  <div class="status" id="status-text">State: Connected to Durable Object</div>
+
+  <script>
+    const chatBox = document.getElementById('chat-box');
+    const form = document.getElementById('chat-form');
+    const input = document.getElementById('msg-input');
+    const btn = document.getElementById('send-btn');
+    const status = document.getElementById('status-text');
+
+    // 1. Session Management
+    // We create a random ID and save it so the browser remembers "who you are"
+    let sessionId = localStorage.getItem('chat_session_id');
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      localStorage.setItem('chat_session_id', sessionId);
+    }
+
+    function addMessage(text, sender) {
+      const div = document.createElement('div');
+      div.className = \`message \${sender}\`;
+      div.innerText = text; // Safe text insertion
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const text = input.value;
+      if (!text.trim()) return;
+
+      // UI Updates
+      addMessage(text, 'user');
+      input.value = '';
+      btn.disabled = true;
+      status.innerText = 'Thinking on the edge...';
+
+      try {
+        // 2. The API Call
+        // We pass the sessionId so the Worker knows which memory to load
+        const res = await fetch(\`/?sessionId=\${sessionId}\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text })
+        });
+
+        if (!res.ok) throw new Error('Worker Error');
+
+        const data = await res.json();
+        addMessage(data.response, 'ai');
+        status.innerText = 'State: Memory Synced';
+      } catch (err) {
+        addMessage('Error: Could not reach the edge.', 'ai');
+        status.innerText = 'State: Error';
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+        input.focus();
+      }
+    };
+  </script>
+</body>
+</html>
+`;
+
+// ==========================================
+// 2. THE BACKEND (Durable Object)
+// ==========================================
+// This class acts as a mini-server dedicated to ONE specific chat session.
+export class ChatRoom extends DurableObject {
+	constructor(state, env) {
+		super(state, env);
+		this.state = state;
+		this.env = env;
+	}
+
+	async fetch(request) {
+		// A. Load existing history from high-speed storage
+		let history = (await this.state.storage.get('history')) || [];
+
+		// B. Parse the User's Input
+		const { message } = await request.json();
+
+		// C. Update History (User turn)
+		history.push({ role: 'user', content: message });
+
+		// (Optimization) Keep only last 10 turns to save context window
+		const historyContext = history.slice(-10);
+
+		try {
+			// D. Run AI Inference
+			// We send the *whole* conversation history to Llama 3.3
+			const response = await this.env.AI.run('@cf/meta/llama-3.3-70b-instruct', {
+				messages: [
+					{
+						role: 'system',
+						content:
+							'You are a concise, helpful AI assistant running on Cloudflare Workers. You have persistent memory of this conversation.',
+					},
+					...historyContext,
+				],
+			});
+
+			// E. Update History (AI turn)
+			const aiResponse = response.response;
+			history.push({ role: 'assistant', content: aiResponse });
+
+			// F. Save everything back to storage
+			await this.state.storage.put('history', history);
+
+			// G. Return the result
+			return new Response(JSON.stringify({ response: aiResponse }), {
+				headers: { 'Content-Type': 'application/json' },
+			});
+		} catch (err) {
+			return new Response(JSON.stringify({ response: 'I had trouble thinking. Please try again.' }), { status: 500 });
+		}
+	}
+}
+
+// ==========================================
+// 3. THE ROUTER (Worker)
+// ==========================================
+export default {
+	async fetch(request, env) {
+		const url = new URL(request.url);
+
+		// ROUTE 1: Serve the Website (GET)
+		if (request.method === 'GET') {
+			return new Response(html, {
+				headers: { 'Content-Type': 'text/html' },
+			});
+		}
+
+		// ROUTE 2: Handle Chat API (POST)
+		if (request.method === 'POST') {
+			const sessionId = url.searchParams.get('sessionId');
+
+			if (!sessionId) {
+				return new Response('Missing sessionId', { status: 400 });
+			}
+
+			// 1. Convert the session ID into a Durable Object ID
+			const id = env.CHAT_HISTORY.idFromName(sessionId);
+
+			// 2. Get the "stub" (a client to talk to that specific object)
+			const stub = env.CHAT_HISTORY.get(id);
+
+			// 3. Forward the request to the Durable Object
+			return stub.fetch(request);
+		}
+
+		return new Response('Not Found', { status: 404 });
+	},
+};
+
+
+// version 2
+
+import { DurableObject } from 'cloudflare:workers';
+
+// ==========================================
+// 1. THE FRONTEND (Updated for Debugging)
+// ==========================================
+const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cloudflare Edge AI (Debug Mode)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f4f4f5; }
+  .chat-container { height: 60vh; overflow-y: scroll; background: white; padding: 20px; border-radius: 12px; border: 1px solid #ccc; display: flex; flex-direction: column; gap: 10px; }
+  .message { padding: 10px 15px; border-radius: 15px; max-width: 85%; line-height: 1.5; }
+  .user { align-self: flex-end; background: #0070f3; color: white; }
+  .ai { align-self: flex-start; background: #e5e5e5; color: black; border: 1px solid #d1d1d1; }
+  .error { align-self: center; background: #fee2e2; color: #991b1b; border: 1px solid #ef4444; font-family: monospace; font-size: 12px; }
+  input { width: 70%; padding: 10px; }
+  button { width: 20%; padding: 10px; background: #0070f3; color: white; border: none; cursor: pointer; }
+</style>
+</head>
+<body>
+  <h2>🛠️ EdgeMind Debugger</h2>
+  <div id="chat-box" class="chat-container"></div>
+  <br>
+  <form id="chat-form" style="display:flex; gap:10px;">
+    <input type="text" id="msg-input" placeholder="Type anything..." required autocomplete="off"/>
+    <button type="submit">Send</button>
+  </form>
+
+  <script>
+    const chatBox = document.getElementById('chat-box');
+    const form = document.getElementById('chat-form');
+    const input = document.getElementById('msg-input');
+
+    let sessionId = localStorage.getItem('chat_session_id') || crypto.randomUUID();
+    localStorage.setItem('chat_session_id', sessionId);
+
+    function addMessage(text, type) {
+      const div = document.createElement('div');
+      div.className = \`message \${type}\`;
+      div.innerText = text;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const text = input.value;
+      addMessage(text, 'user');
+      input.value = '';
+
+      try {
+        const res = await fetch(\`/?sessionId=\${sessionId}\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text })
+        });
+
+        // If the server crashes, we will now know WHY
+        const data = await res.json();
+        
+        if (data.error) {
+           addMessage("⚠️ SERVER ERROR: " + data.error, 'error');
+        } else {
+           addMessage(data.response, 'ai');
+        }
+
+      } catch (err) {
+        addMessage('❌ NETWORK ERROR: ' + err.message, 'error');
+      }
+    };
+  </script>
+</body>
+</html>
+`;
+
+// ==========================================
+// 2. THE BACKEND (Durable Object with Error Catching)
+// ==========================================
+export class ChatRoom extends DurableObject {
+	constructor(state, env) {
+		super(state, env);
+		this.state = state;
+		this.env = env;
+	}
+
+	async fetch(request) {
+		let history = (await this.state.storage.get('history')) || [];
+		const { message } = await request.json();
+		history.push({ role: 'user', content: message });
+
+		// Trim history to prevent overflow
+		const context = history.slice(-6);
+
+		try {
+			// DEBUG: We are using the 8B model because it is safer for Free Tier
+			const model = '@cf/meta/llama-3.1-8b-instruct';
+
+			const response = await this.env.AI.run(model, {
+				messages: [{ role: 'system', content: 'You are a helpful assistant.' }, ...context],
+			});
+
+			// CHECK: Did the AI actually reply?
+			if (!response || !response.response) {
+				throw new Error('AI returned empty result. Model might be busy.');
+			}
+
+			const aiMessage = response.response;
+			history.push({ role: 'assistant', content: aiMessage });
+			await this.state.storage.put('history', history);
+
+			return new Response(JSON.stringify({ response: aiMessage }), {
+				headers: { 'Content-Type': 'application/json' },
+			});
+		} catch (err) {
+			// CRITICAL: We send the error back to the user so we can see it!
+			return new Response(
+				JSON.stringify({
+					response: 'Error',
+					error: err.message,
+				}),
+				{
+					headers: { 'Content-Type': 'application/json' }, // Return 200 so frontend can parse the error JSON
+				},
+			);
+		}
+	}
+}
+
+// ==========================================
+// 3. THE ROUTER
+// ==========================================
+export default {
+	async fetch(request, env) {
+		const url = new URL(request.url);
+
+		if (request.method === 'GET') {
+			return new Response(html, { headers: { 'Content-Type': 'text/html' } });
+		}
+
+		if (request.method === 'POST') {
+			const sessionId = url.searchParams.get('sessionId');
+			if (!sessionId) return new Response('Missing sessionId', { status: 400 });
+
+			const id = env.CHAT_HISTORY.idFromName(sessionId);
+			const stub = env.CHAT_HISTORY.get(id);
+			return stub.fetch(request);
+		}
+
+		return new Response('Not Found', { status: 404 });
+	},
+};
