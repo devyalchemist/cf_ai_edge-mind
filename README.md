@@ -119,18 +119,21 @@ Bash
 
 npx wrangler deploy
 
-🧠 Engineering Decisions
+# 🧠 Engineering Decisions
+
 Why Durable Objects?
 I chose Durable Objects over an external Vector DB (like Pinecone) or Redis because of Data Locality. In a chat application, the "Read-Your-Writes" consistency is critical. Durable Objects guarantee that if a user sends a message, the very next read will include that message, eliminating the eventual consistency issues common in distributed systems.
 
-Why Llama 3.1 8B?
+# Why Llama 3.1 8B?
+
 While Llama 3.3 (70B) offers higher intelligence, it incurs higher latency and timeout risks on the Free Tier. The 8B model provides the optimal balance of speed and reasoning capability for a real-time chat interface.
 
-🔮 Future Roadmap
+# 🔮 Future Roadmap
+
 [ ] RAG Integration: Connect to Cloudflare Vectorize for long-term document recall.
 
 [ ] Streaming: Implement TextEncoderStream for typewriter-style responses.
 
 [ ] Secure Auth: Replace the handle system with Cloudflare Access (OAuth).
 
-Built by DevyAlchemist.
+# Built by DevyAlchemist.
