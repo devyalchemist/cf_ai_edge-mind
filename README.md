@@ -34,14 +34,14 @@ graph TD
     User((User)) -->|HTTPS| Worker[Cloudflare Worker Gateway]
 
     subgraph "Cloudflare Edge Network"
-        Worker -->|GET /| UI[Serve Static HTML/JS]
-        Worker -->|POST /chat| Router[Session Router]
+        Worker -->|"GET /"| UI[Serve Static HTML/JS]
+        Worker -->|"POST /chat"| Router[Session Router]
 
-        Router -->|Hash(Username)| DO[Durable Object (The Locker)]
+        Router -->|"Hash(Username)"| DO["Durable Object (The Locker)"]
 
         subgraph "Durable Object Instance"
-            DO <-->|Read/Write| SQLite[(SQLite History)]
-            DO -->|Prompt + Context| AI[Workers AI (Llama 3.1)]
+            DO <-->|"Read/Write"| SQLite[("SQLite History")]
+            DO -->|"Prompt + Context"| AI["Workers AI (Llama 3.1)"]
             AI -->|Response| DO
         end
     end
